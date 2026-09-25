@@ -88,7 +88,7 @@ I have a flat vector.
 In memory this means that it is all contigious but the best way to acess this is to iterate through each column in a row
 Becasue the memory adresses are closer together which increase our chances of hitting cache.
 */
-inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
+inline void apply_stencil(const Grid& __restrict__ old_grid, Grid& __restrict__ new_grid){
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
   //Copy over the first row
