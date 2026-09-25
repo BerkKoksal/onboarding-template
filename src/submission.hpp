@@ -10,36 +10,36 @@
 template <typename T, std::size_t Alignment>
 class AlignedAllocator{
   public:
-    using value_type = T;
-    AlignedAllocator() noexcept = default;
+  using value_type = T;
+  AlignedAllocator() noexcept = default;
 
-    template <typename U>
-    AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
+  template <typename U>
+  AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
 
-    template <typename U>
-    struct rebind{
-      using other = AlignedAllocator<U, Alignment>;
-    };
+  template <typename U>
+  struct rebind{
+    using other = AlignedAllocator<U, Alignment>;
+  };
 
-    T* allocate(std::size_t n){
-      void* ptr = ::operator new(n * sizeof(T),std::align_val_t{Alignment});
+  T* allocate(std::size_t n){
+    void* ptr = ::operator new(n * sizeof(T),std::align_val_t{Alignment});
 
-      return static_cast<T*>(ptr);
-    }
+    return static_cast<T*>(ptr);
+  }
 
-    void deallocate(T* ptr, std::size_t){
-      ::operator delete(ptr,std::align_val_t{Alignment});
-    }
+  void deallocate(T* ptr, std::size_t){
+    ::operator delete(ptr,std::align_val_t{Alignment});
+  }
 
-    template <typename U>
-    bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept{
-      return true;
-    }
+  template <typename U>
+  bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept{
+    return true;
+  }
 
-    template <typename U>
-    bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept{
-      return false;
-    }
+  template <typename U>
+  bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept{
+    return false;
+  }
 };
 
 
@@ -52,6 +52,7 @@ class Grid {
 private:
   std::size_t rows_;
   std::size_t cols_;
+  std::size_t stride_;
   std::vector<double, AlignedAllocator<double, 64>> grid;
 
 public:
@@ -59,13 +60,14 @@ public:
   Grid(std::size_t rows, std::size_t cols) :
     rows_(rows),
     cols_(cols),
-    grid(rows * cols){}
+    stride_(cols + 16),
+    grid(rows * stride_){}
 
   double& operator()(std::size_t i, std::size_t j){
-    return grid[i*cols_ + j];
+    return grid[i*stride_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const{
-    return grid[i*cols_ +j];
+    return grid[i*stride_ +j];
   }
 
   //Just providing simple getter functions
