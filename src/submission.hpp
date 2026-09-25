@@ -56,6 +56,8 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
   }
 
   //Copy over the middle
+  //Great candidate for paralellism because we are reading from old grid and writing to new one. No threads can mutate the same data
+  #pragma omp parallel for schedule(static)
   for(std::size_t i = 1; i < rows - 1; i++){
     //copy beginning
     new_grid(i,0) = old_grid(i,0);
