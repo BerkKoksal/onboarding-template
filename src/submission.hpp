@@ -10,36 +10,36 @@
 template <typename T, std::size_t Alignment>
 class AlignedAllocator{
   public:
-    using value_type = T;
-    AlignedAllocator() noexcept = default;
+  using value_type = T;
+  AlignedAllocator() noexcept = default;
 
-    template <typename U>
-    AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
+  template <typename U>
+  AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
 
-    template <typename U>
-    struct rebind{
-      using other = AlignedAllocator<U, Alignment>;
-    };
+  template <typename U>
+  struct rebind{
+    using other = AlignedAllocator<U, Alignment>;
+  };
 
-    T* allocate(std::size_t n){
-      void* ptr = ::operator new(n * sizeof(T),std::align_val_t{Alignment});
+  T* allocate(std::size_t n){
+    void* ptr = ::operator new(n * sizeof(T),std::align_val_t{Alignment});
 
-      return static_cast<T*>(ptr);
-    }
+    return static_cast<T*>(ptr);
+  }
 
-    void deallocate(T* ptr, std::size_t){
-      ::operator delete(ptr,std::align_val_t{Alignment});
-    }
+  void deallocate(T* ptr, std::size_t){
+    ::operator delete(ptr,std::align_val_t{Alignment});
+  }
 
-    template <typename U>
-    bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept{
-      return true;
-    }
+  template <typename U>
+  bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept{
+    return true;
+  }
 
-    template <typename U>
-    bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept{
-      return false;
-    }
+  template <typename U>
+  bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept{
+    return false;
+  }
 };
 
 
@@ -55,77 +55,19 @@ private:
   std::size_t stride_;
   std::vector<double, AlignedAllocator<double, 64>> grid;
 
-  bool activity_known_;
-  bool has_active_;
-  std::size_t active_top_;
-  std::size_t active_bottom_;
-  std::size_t active_left_;
-  std::size_t active_right_;
-
 public:
   //Using this shape of constructor because it constructs at the right size, instead of resizing
   Grid(std::size_t rows, std::size_t cols) :
     rows_(rows),
     cols_(cols),
     stride_(cols + 16),
-    grid(rows * stride_),
-    activity_known_(false),
-    has_active_(false),
-    active_top_(0),
-    active_bottom_(0),
-    active_left_(0),
-    active_right_(0){}
+    grid(rows * stride_){}
 
   double& operator()(std::size_t i, std::size_t j){
-    activity_known_ = false;
     return grid[i*stride_ + j];
   }
-
-  double operator()(std::size_t i, std::size_t j) const{
+  double  operator()(std::size_t i, std::size_t j) const{
     return grid[i*stride_ +j];
-  }
-
-  double& raw(std::size_t i, std::size_t j){
-    return grid[i*stride_ + j];
-  }
-
-  bool activity_known() const{
-    return activity_known_;
-  }
-
-  bool has_active() const{
-    return has_active_;
-  }
-
-  std::size_t active_top() const{
-    return active_top_;
-  }
-
-  std::size_t active_bottom() const{
-    return active_bottom_;
-  }
-
-  std::size_t active_left() const{
-    return active_left_;
-  }
-
-  std::size_t active_right() const{
-    return active_right_;
-  }
-
-  void set_activity(
-    bool has_active,
-    std::size_t top,
-    std::size_t bottom,
-    std::size_t left,
-    std::size_t right
-  ){
-    activity_known_ = true;
-    has_active_ = has_active;
-    active_top_ = top;
-    active_bottom_ = bottom;
-    active_left_ = left;
-    active_right_ = right;
   }
 
   //Just providing simple getter functions
@@ -149,123 +91,34 @@ Becasue the memory adresses are closer together which increase our chances of hi
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
-
-  bool has_active = old_grid.has_active();
-  std::size_t active_top = old_grid.active_top();
-  std::size_t active_bottom = old_grid.active_bottom();
-  std::size_t active_left = old_grid.active_left();
-  std::size_t active_right = old_grid.active_right();
-
-  if(!old_grid.activity_known()){
-    has_active = false;
-
-    for(std::size_t i = 0; i < rows; i++){
-      for(std::size_t j = 0; j < cols; j++){
-        if(old_grid(i,j) != 0.0){
-          if(!has_active){
-            active_top = i;
-            active_bottom = i;
-            active_left = j;
-            active_right = j;
-            has_active = true;
-          }
-          else{
-            if(i < active_top){
-              active_top = i;
-            }
-            if(i > active_bottom){
-              active_bottom = i;
-            }
-            if(j < active_left){
-              active_left = j;
-            }
-            if(j > active_right){
-              active_right = j;
-            }
-          }
-        }
-      }
-    }
-  }
-
   //Copy over the first row
   for(std::size_t j = 0; j < cols; j++){
-    new_grid.raw(0,j) = old_grid(0,j);
+    new_grid(0,j) = old_grid(0,j);
   }
 
   //Copy over the middle
   //Great candidate for paralellism because we are reading from old grid and writing to new one. No threads can mutate the same data
+  #pragma omp parallel for schedule(static)
   for(std::size_t i = 1; i < rows - 1; i++){
     //copy beginning
-    new_grid.raw(i,0) = old_grid(i,0);
-    new_grid.raw(i,cols-1) = old_grid(i,cols-1);
+    new_grid(i,0) = old_grid(i,0);
+    //calcualte middle
+    #pragma omp simd
+    for(std::size_t j = 1; j < cols - 1; j++){
+      new_grid(i, j) =
+        0.5 * old_grid(i, j) +
+        0.125 * (
+            old_grid(i - 1, j) +
+            old_grid(i + 1, j) +
+            old_grid(i, j - 1) +
+            old_grid(i, j + 1)
+        );
+    }
+    new_grid(i,cols-1) = old_grid(i,cols-1);
     //copy end
   }
-
   //Copy over the last row
   for(std::size_t j = 0; j < cols; j++){
-     new_grid.raw(rows-1,j) = old_grid(rows-1,j);
+     new_grid(rows-1,j) = old_grid(rows-1,j);
   }
-
-  if(!has_active){
-    new_grid.set_activity(false, 0, 0, 0, 0);
-    return;
-  }
-
-  if(active_top > 0){
-    active_top--;
-  }
-  if(active_bottom + 1 < rows){
-    active_bottom++;
-  }
-  if(active_left > 0){
-    active_left--;
-  }
-  if(active_right + 1 < cols){
-    active_right++;
-  }
-
-  std::size_t row_begin = active_top;
-  std::size_t row_end = active_bottom;
-  std::size_t col_begin = active_left;
-  std::size_t col_end = active_right;
-
-  if(row_begin < 1){
-    row_begin = 1;
-  }
-  if(row_end > rows - 2){
-    row_end = rows - 2;
-  }
-  if(col_begin < 1){
-    col_begin = 1;
-  }
-  if(col_end > cols - 2){
-    col_end = cols - 2;
-  }
-
-  if(row_begin <= row_end && col_begin <= col_end){
-    #pragma omp parallel for schedule(static)
-    for(std::size_t i = row_begin; i <= row_end; i++){
-      //calcualte middle
-      #pragma omp simd
-      for(std::size_t j = col_begin; j <= col_end; j++){
-        new_grid.raw(i, j) =
-          0.5 * old_grid(i, j) +
-          0.125 * (
-              old_grid(i - 1, j) +
-              old_grid(i + 1, j) +
-              old_grid(i, j - 1) +
-              old_grid(i, j + 1)
-          );
-      }
-    }
-  }
-
-  new_grid.set_activity(
-    true,
-    active_top,
-    active_bottom,
-    active_left,
-    active_right
-  );
 }
