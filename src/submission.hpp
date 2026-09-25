@@ -53,7 +53,13 @@ private:
   std::size_t rows_;
   std::size_t cols_;
   std::size_t stride_;
+  std::size_t id_;
   std::vector<double, AlignedAllocator<double, 64>> grid;
+
+  static std::size_t next_id(){
+    static std::size_t id = 1;
+    return id++;
+  }
 
 public:
   //Using this shape of constructor because it constructs at the right size, instead of resizing
@@ -61,6 +67,7 @@ public:
     rows_(rows),
     cols_(cols),
     stride_(cols + 16),
+    id_(next_id()),
     grid(rows * stride_){}
 
   double& operator()(std::size_t i, std::size_t j){
@@ -68,6 +75,10 @@ public:
   }
   double  operator()(std::size_t i, std::size_t j) const{
     return grid[i*stride_ +j];
+  }
+
+  std::size_t id() const{
+    return id_;
   }
 
   //Just providing simple getter functions
@@ -91,6 +102,63 @@ Becasue the memory adresses are closer together which increase our chances of hi
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
+
+  static std::size_t grid_one_id = 0;
+  static std::size_t grid_two_id = 0;
+  static std::size_t tracked_rows = 0;
+  static std::size_t tracked_cols = 0;
+
+  static bool has_active = false;
+  static std::size_t active_top = 0;
+  static std::size_t active_bottom = 0;
+  static std::size_t active_left = 0;
+  static std::size_t active_right = 0;
+
+  bool same_pair =
+    tracked_rows == rows &&
+    tracked_cols == cols &&
+    (
+      (grid_one_id == old_grid.id() && grid_two_id == new_grid.id()) ||
+      (grid_one_id == new_grid.id() && grid_two_id == old_grid.id())
+    );
+
+  if(!same_pair){
+    grid_one_id = old_grid.id();
+    grid_two_id = new_grid.id();
+    tracked_rows = rows;
+    tracked_cols = cols;
+
+    has_active = false;
+
+    for(std::size_t i = 0; i < rows; i++){
+      for(std::size_t j = 0; j < cols; j++){
+        if(old_grid(i,j) != 0.0){
+          if(!has_active){
+            active_top = i;
+            active_bottom = i;
+            active_left = j;
+            active_right = j;
+            has_active = true;
+          }
+          else{
+            if(i < active_top){
+              active_top = i;
+            }
+            if(i > active_bottom){
+              active_bottom = i;
+            }
+            if(j < active_left){
+              active_left = j;
+            }
+            if(j > active_right){
+              active_right = j;
+            }
+          }
+        }
+      }
+    }
+  }
+
   //Copy over the first row
   for(std::size_t j = 0; j < cols; j++){
     new_grid(0,j) = old_grid(0,j);
@@ -98,27 +166,68 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
   //Copy over the middle
   //Great candidate for paralellism because we are reading from old grid and writing to new one. No threads can mutate the same data
-  #pragma omp parallel for schedule(static)
   for(std::size_t i = 1; i < rows - 1; i++){
     //copy beginning
     new_grid(i,0) = old_grid(i,0);
-    //calcualte middle
-    #pragma omp simd
-    for(std::size_t j = 1; j < cols - 1; j++){
-      new_grid(i, j) =
-        0.5 * old_grid(i, j) +
-        0.125 * (
-            old_grid(i - 1, j) +
-            old_grid(i + 1, j) +
-            old_grid(i, j - 1) +
-            old_grid(i, j + 1)
-        );
-    }
     new_grid(i,cols-1) = old_grid(i,cols-1);
     //copy end
   }
+
   //Copy over the last row
   for(std::size_t j = 0; j < cols; j++){
      new_grid(rows-1,j) = old_grid(rows-1,j);
+  }
+
+  if(!has_active){
+    return;
+  }
+
+  if(active_top > 0){
+    active_top--;
+  }
+  if(active_bottom + 1 < rows){
+    active_bottom++;
+  }
+  if(active_left > 0){
+    active_left--;
+  }
+  if(active_right + 1 < cols){
+    active_right++;
+  }
+
+  std::size_t row_begin = active_top;
+  std::size_t row_end = active_bottom;
+  std::size_t col_begin = active_left;
+  std::size_t col_end = active_right;
+
+  if(row_begin < 1){
+    row_begin = 1;
+  }
+  if(row_end > rows - 2){
+    row_end = rows - 2;
+  }
+  if(col_begin < 1){
+    col_begin = 1;
+  }
+  if(col_end > cols - 2){
+    col_end = cols - 2;
+  }
+
+  if(row_begin <= row_end && col_begin <= col_end){
+    #pragma omp parallel for schedule(static)
+    for(std::size_t i = row_begin; i <= row_end; i++){
+      //calcualte middle
+      #pragma omp simd
+      for(std::size_t j = col_begin; j <= col_end; j++){
+        new_grid(i, j) =
+          0.5 * old_grid(i, j) +
+          0.125 * (
+              old_grid(i - 1, j) +
+              old_grid(i + 1, j) +
+              old_grid(i, j - 1) +
+              old_grid(i, j + 1)
+          );
+      }
+    }
   }
 }
