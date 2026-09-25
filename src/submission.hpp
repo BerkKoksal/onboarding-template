@@ -2,6 +2,45 @@
 
 #include <cstddef>
 #include <vector>
+#include <new>
+
+
+
+
+template <typename T, std::size_t Alignment>
+class AlignedAllocator{
+  public:
+    using value_type = T;
+    AlignedAllocator() noexcept = default;
+
+    template <typename U>
+    AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
+
+    template <typename U>
+    struct rebind{
+      using other = AlignedAllocator<U, Alignment>;
+    };
+
+    T* allocate(std::size_t n){
+      void* ptr = ::operator new(n * sizeof(T),std::align_val_t{Alignment});
+
+      return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* ptr, std::size_t){
+      ::operator delete(ptr,std::align_val_t{Alignment});
+    }
+
+    template <typename U>
+    bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept{
+      return true;
+    }
+
+    template <typename U>
+    bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept{
+      return false;
+    }
+};
 
 
 // Starter Grid for the 2D heat-diffusion problem.
@@ -13,7 +52,7 @@ class Grid {
 private:
   std::size_t rows_;
   std::size_t cols_;
-  std::vector<double> grid;
+  std::vector<double, AlignedAllocator<double, 64>> grid;
 
 public:
   //Using this shape of constructor because it constructs at the right size, instead of resizing
