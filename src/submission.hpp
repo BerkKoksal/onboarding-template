@@ -47,7 +47,7 @@ I have a flat vector.
 In memory this means that it is all contigious but the best way to acess this is to iterate through each column in a row
 Becasue the memory adresses are closer together which increase our chances of hitting cache.
 */
-void apply_stencil(const Grid& old_grid, Grid& new_grid){
+inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
   //Copy over the first row
@@ -62,6 +62,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
     //copy beginning
     new_grid(i,0) = old_grid(i,0);
     //calcualte middle
+    #pragma omp simd
     for(std::size_t j = 1; j < cols - 1; j++){
       new_grid(i, j) =
         0.5 * old_grid(i, j) +
