@@ -54,6 +54,7 @@ private:
   std::size_t cols_;
   std::size_t stride_;
   std::size_t id_;
+  std::size_t version_;
   std::vector<double, AlignedAllocator<double, 64>> grid;
 
   static std::size_t next_id(){
@@ -68,23 +69,35 @@ public:
     cols_(cols),
     stride_(cols + 16),
     id_(next_id()),
+    version_(0),
     grid(rows * stride_){}
 
   double& operator()(std::size_t i, std::size_t j){
+    version_++;
     return grid[i*stride_ + j];
   }
-  double  operator()(std::size_t i, std::size_t j) const{
+
+  double operator()(std::size_t i, std::size_t j) const{
     return grid[i*stride_ +j];
+  }
+
+  double& raw(std::size_t i, std::size_t j){
+    return grid[i*stride_ + j];
   }
 
   std::size_t id() const{
     return id_;
   }
 
+  std::size_t version() const{
+    return version_;
+  }
+
   //Just providing simple getter functions
   std::size_t rows() const{
     return rows_;
   }
+
   std::size_t cols() const{
     return cols_;
   }
@@ -105,6 +118,8 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
   static std::size_t grid_one_id = 0;
   static std::size_t grid_two_id = 0;
+  static std::size_t grid_one_version = 0;
+  static std::size_t grid_two_version = 0;
   static std::size_t tracked_rows = 0;
   static std::size_t tracked_cols = 0;
 
@@ -114,17 +129,27 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   static std::size_t active_left = 0;
   static std::size_t active_right = 0;
 
-  bool same_pair =
-    tracked_rows == rows &&
-    tracked_cols == cols &&
-    (
-      (grid_one_id == old_grid.id() && grid_two_id == new_grid.id()) ||
-      (grid_one_id == new_grid.id() && grid_two_id == old_grid.id())
-    );
+  bool same_pair = false;
+
+  if(tracked_rows == rows && tracked_cols == cols){
+    if(grid_one_id == old_grid.id() && grid_two_id == new_grid.id()){
+      same_pair =
+        grid_one_version == old_grid.version() &&
+        grid_two_version == new_grid.version();
+    }
+    else if(grid_one_id == new_grid.id() && grid_two_id == old_grid.id()){
+      same_pair =
+        grid_one_version == new_grid.version() &&
+        grid_two_version == old_grid.version();
+    }
+  }
 
   if(!same_pair){
     grid_one_id = old_grid.id();
     grid_two_id = new_grid.id();
+    grid_one_version = old_grid.version();
+    grid_two_version = new_grid.version();
+
     tracked_rows = rows;
     tracked_cols = cols;
 
@@ -132,7 +157,11 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
     for(std::size_t i = 0; i < rows; i++){
       for(std::size_t j = 0; j < cols; j++){
-        if(old_grid(i,j) != 0.0){
+        double value = old_grid(i,j);
+
+        new_grid.raw(i,j) = value;
+
+        if(value != 0.0){
           if(!has_active){
             active_top = i;
             active_bottom = i;
@@ -161,21 +190,21 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
   //Copy over the first row
   for(std::size_t j = 0; j < cols; j++){
-    new_grid(0,j) = old_grid(0,j);
+    new_grid.raw(0,j) = old_grid(0,j);
   }
 
   //Copy over the middle
   //Great candidate for paralellism because we are reading from old grid and writing to new one. No threads can mutate the same data
   for(std::size_t i = 1; i < rows - 1; i++){
     //copy beginning
-    new_grid(i,0) = old_grid(i,0);
-    new_grid(i,cols-1) = old_grid(i,cols-1);
+    new_grid.raw(i,0) = old_grid(i,0);
+    new_grid.raw(i,cols-1) = old_grid(i,cols-1);
     //copy end
   }
 
   //Copy over the last row
   for(std::size_t j = 0; j < cols; j++){
-     new_grid(rows-1,j) = old_grid(rows-1,j);
+     new_grid.raw(rows-1,j) = old_grid(rows-1,j);
   }
 
   if(!has_active){
@@ -185,12 +214,15 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   if(active_top > 0){
     active_top--;
   }
+
   if(active_bottom + 1 < rows){
     active_bottom++;
   }
+
   if(active_left > 0){
     active_left--;
   }
+
   if(active_right + 1 < cols){
     active_right++;
   }
@@ -203,12 +235,15 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
   if(row_begin < 1){
     row_begin = 1;
   }
+
   if(row_end > rows - 2){
     row_end = rows - 2;
   }
+
   if(col_begin < 1){
     col_begin = 1;
   }
+
   if(col_end > cols - 2){
     col_end = cols - 2;
   }
@@ -219,7 +254,7 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
       //calcualte middle
       #pragma omp simd
       for(std::size_t j = col_begin; j <= col_end; j++){
-        new_grid(i, j) =
+        new_grid.raw(i, j) =
           0.5 * old_grid(i, j) +
           0.125 * (
               old_grid(i - 1, j) +
